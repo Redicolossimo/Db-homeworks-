@@ -131,6 +131,18 @@ SELECT id, name FROM users WHERE id IN (SELECT user_id FROM orders);
 
 SELECT user_id FROM orders;
 
+-- или
+ 
+SELECT 
+	u.id, u.name, u.birthday_at
+FROM
+	users AS u
+JOIN
+	orders AS o
+ON
+	u.id=o.user_id
+GROUP BY id;
+
 -- 2. Выведите список товаров products и разделов catalogs, который соответствует товару.
 
 SELECT * FROM products; 
@@ -191,3 +203,17 @@ SELECT
 	(SELECT c.name FROM cities c where  c.label=f.`to`) AS`to`
 FROM 
 	flights f;
+	
+-- или
+
+SELECT 
+	f.id,
+	cities_from.name AS `from`,
+	cities_to.name AS`to`
+FROM 
+	flights f
+	LEFT JOIN cities AS cities_from
+		ON f.from = cities_from.label
+	LEFT JOIN cities AS cities_to
+		ON f.to = cities_to.label
+	ORDER BY id;

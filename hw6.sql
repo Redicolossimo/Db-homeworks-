@@ -103,13 +103,68 @@ WHERE to_user_id = 6 AND to_user_id = (SELECT user_id FROM friendship WHERE frie
 GROUP BY from_user_id 
 ORDER BY message_count DESC LIMIT 1;
 
--- 3. Подсчитать общее количество лайков, которые получили 10 самых молодых пользователей.
+-- var3
+SELECT * FROM  friendship_statuses;
+desc friendship;
 
-SELECT SUM(likes) as likes_count
-FROM (SELECT
-    		(SELECT COUNT(*) FROM likes WHERE target_id = profiles.user_id) AS likes
+SELECT 	CONCAT(u.first_name, ' ', u.last_name) AS friend,
+		COUNT(from_user_id) AS total_messages 
+FROM messages m
+	JOIN friendship f
+	ON m.from_user_id = f.user_id
+	JOIN users u
+	ON u.id = m.from_user_id
+WHERE to_user_id = 6 OR from_user_id = 6
+GROUP BY m.from_user_id 
+ORDER BY total_messages DESC LIMIT 1;
+
+SELECT 
+  CONCAT(u.first_name, ' ', u.last_name) AS name,
+    COUNT(to_user_id) AS messages_count
+FROM
+  messages m
+    JOIN users u
+    JOIN friendship f
+    ON (f.user_id = m.to_user_id AND f.friend_id = u.id) 
+      OR (f.friend_id = m.to_user_id AND f.user_id = u.id)
+WHERE to_user_id = 6 AND from_user_id = u.id
+GROUP BY name
+ORDER BY messages_count DESC LIMIT 1;
+
+-- 3. Подсчитать общее количество лайков, которые получили 10 самых молодых пользователей.
+-- var1
+SELECT SUM(likes) as likes_count FROM (
+	SELECT
+      (SELECT COUNT(*) 
+    	  FROM likes
+    		  WHERE target_id = profiles.user_id) AS likes
 	  FROM profiles
 	  ORDER BY birthday DESC LIMIT 10) AS summ;
+-- var2	 
+SELECT SUM(likes_per_user) AS likes_total FROM ( 
+  SELECT COUNT(*) AS likes_per_user 
+    FROM likes 
+      WHERE target_type_id = 2
+        AND target_id IN (
+          SELECT * FROM (
+            SELECT user_id FROM profiles ORDER BY birthday DESC LIMIT 10
+          ) AS sorted_profiles 
+        ) 
+      GROUP BY target_id
+) AS counted_likes;
+-- var3
+SELECT sum(likes) as likes_total FROM(
+SELECT 
+  p.user_id,
+    COUNT(l.id) as likes
+FROM
+  profiles p
+    JOIN likes l
+    ON l.target_id = p.user_id AND l.target_type_id = 2
+GROUP BY user_id
+ORDER BY birthday DESC LIMIT 10) AS coundet_likes;
+
+
 
 -- 4. Определить кто больше поставил лайков (всего) - мужчины или женщины?
 
@@ -138,6 +193,24 @@ FROM
    ORDER BY women_likes) AS women
 ORDER BY NULL;
 
+SELECT
+  male_likes_count,
+  female_likes_count,
+  ABS(female_likes_count - male_likes_count) AS difference
+FROM
+  (SELECT COUNT(*) AS male_likes_count
+    FROM
+      profiles p
+      JOIN likes l
+        ON l.user_id = p.user_id AND p.sex = 'm'
+  ) AS male_likes,
+    (SELECT COUNT(*) AS female_likes_count
+    FROM 
+      profiles p
+      JOIN likes l
+        ON l.user_id = p.user_id AND p.sex = 'f'
+  ) AS female_likes;
+
 -- 5. Найти 10 пользователей, которые проявляют наименьшую активность в использовании
 -- социальной сети.
 -- исхожу из того что активность человека в соцсети это  сообщения, посты и лайки, отсюда получаю общую активность пользователя
@@ -150,3 +223,56 @@ SELECT
   (SELECT COUNT(*) FROM messages m WHERE from_user_id = users.id) +
   (SELECT COUNT(*) FROM posts p WHERE user_id = users.id) AS total_activity
 FROM users ORDER BY total_activity LIMIT 10;
+
+SELECT CONCAT(first_name, ' ', last_name) AS user, 
+	(SELECT COUNT(*) FROM likes WHERE likes.user_id = users.id) + 
+	(SELECT COUNT(*) FROM media WHERE media.user_id = users.id) + 
+	(SELECT COUNT(*) FROM messages WHERE messages.from_user_id = users.id) 
+	AS overall_activity 
+	FROM users
+	ORDER BY overall_activity
+	LIMIT 10;
+
+SELECT
+  users.id,
+  (mes.count + pos.count + lik.count) AS activity,
+  (SELECT CONCAT(first_name, ' ', last_name)
+   FROM users u1
+   WHERE u1.id = users.id
+  ) AS name
+FROM users
+  JOIN
+  (SELECT
+     users.id           AS user_id,
+     COUNT(messages.id) AS count
+   FROM users
+     LEFT JOIN messages
+       ON messages.from_user_id = users.id
+   GROUP BY users.id
+   ORDER BY count ASC, count
+  ) AS mes,
+  (SELECT
+     users.id        AS user_id,
+     COUNT(posts.id) AS count
+   FROM users
+     LEFT JOIN posts
+       ON posts.user_id = users.id
+   GROUP BY users.id
+   ORDER BY count ASC, count
+  ) AS pos,
+  (SELECT
+     users.id        AS user_id,
+     COUNT(likes.id) AS count
+   FROM users
+     LEFT JOIN likes
+       ON likes.user_id = users.id
+   GROUP BY users.id
+   ORDER BY count ASC, count
+  ) AS lik
+WHERE mes.user_id = users.id
+      AND pos.user_id = users.id
+      AND lik.user_id = users.id
+GROUP BY users.id
+ORDER BY activity ASC, activity
+LIMIT 10
+
