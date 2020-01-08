@@ -262,3 +262,167 @@ CREATE INDEX likes_target_id_idx ON likes(target_id);
 CREATE INDEX profiles_sex_idx ON profiles(sex);
 CREATE INDEX profiles_hometown_idx ON profiles(hometown);
 CREATE INDEX film_info_country_idx ON film_info(country);
+
+-- 6. скрипты характерных выборок (включающие группировки, JOIN'ы, вложенные таблицы);
+
+-- Скрипт выводящий самый старый фильм, самый новый фильм в категории, количество филььмов в категории, часть фильмов категории
+-- относительно общего кколичества фильмов, и два способа получения среднего количества фильмов по ккатегориям
+
+SELECT DISTINCT category_types.name, 
+				category_types.id,
+ 				MAX(films.release_date) OVER win AS youngest,
+				MIN(films.release_date) OVER win AS oldest,
+				COUNT(film_info.film_id) OVER win AS amount,
+				COUNT(films.id) OVER() AS total,
+				COUNT(film_info.film_id) OVER win / COUNT(films.id) OVER() * 100 as '%%',
+				FLOOR(COUNT(films.id) OVER() / (SELECT COUNT(category_types.id) FROM category_types)) AS avg,
+				FLOOR(((SELECT COUNT(DISTINCT film_info.film_id) AS amount FROM film_info
+							JOIN category_types
+        						ON film_info.film_cat_id = category_types.id
+							WHERE film_info.film_cat_id = category_types.id 
+							GROUP BY category_types.id 
+							ORDER BY amount 
+							DESC 
+							LIMIT 1)
+					 +(SELECT COUNT(DISTINCT film_info.film_id) AS amount FROM film_info
+							JOIN category_types
+        						ON film_info.film_cat_id = category_types.id
+							WHERE film_info.film_cat_id = category_types.id 
+							GROUP BY category_types.id 
+							ORDER BY amount 
+							ASC 
+							LIMIT 1))
+							/2) 
+							AS real_avg
+FROM films	
+			JOIN film_info
+      			ON films.id = film_info.film_id
+      		JOIN category_types
+        		ON film_info.film_cat_id = category_types.id
+        	WINDOW win AS (PARTITION BY category_types.id);
+
+-- 10 самых популярных фильмов     
+
+SELECT films.id,
+  COUNT(DISTINCT reviews.id) +
+  COUNT(DISTINCT media.id) AS activity
+  FROM films
+    LEFT JOIN reviews
+      ON films.id = reviews.film_id
+    LEFT JOIN media
+      ON films.id = media.film_id
+  GROUP BY films.id
+  ORDER BY activity DESC
+  LIMIT 10;
+  
+-- 7. представления (минимум 2);
+
+-- Представлениия
+-- 7.1 Рецензии на фильмы с указанием названия и автора 
+
+CREATE OR REPLACE VIEW reviews_on_from AS
+SELECT
+  f.title AS Film_title,
+  (SELECT CONCAT(u.first_name, ' ', u.last_name)) AS author,
+  r.body as review
+FROM
+  reviews AS r
+JOIN
+  users AS u
+ON
+  r.user_id = u.id
+JOIN 
+  films AS f
+ON
+  r.film_id = f.id;
+ 
+SELECT * FROM reviews_on_from;
+
+-- 7.2 Фильм, и его жанр
+
+CREATE OR REPLACE VIEW genre AS
+SELECT
+  f.title AS Film_title,
+  ct.name AS genre
+FROM
+  film_info AS fi
+JOIN
+  category_types AS ct
+ON
+  fi.film_cat_id = ct.id
+JOIN 
+  films AS f
+ON
+  fi.film_id = f.id;
+ 
+SELECT * FROM genre;
+
+
+-- ТРИГГЕРЫ
+
+DELIMITER -
+
+-- Проверяем, что бы поле email или поле phone было заполнено
+
+DROP TRIGGER IF EXISTS email_and_tel_validation_on_insert-
+CREATE TRIGGER email_and_tel_validation_on_insert 
+BEFORE INSERT ON kinopoisk_db.users
+FOR EACH ROW
+BEGIN
+  IF (NEW.email IS NULL AND NEW.phone IS NULL) THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'email or phone is not exisits';
+  END IF;
+END-
+
+DROP TRIGGER IF EXISTS email_and_tel_validation_on_update-
+CREATE TRIGGER email_and_tel_validation_on_update 
+BEFORE UPDATE ON kinopoisk_db.users
+FOR EACH ROW
+BEGIN
+  IF (NEW.email IS NULL AND NEW.phone IS NULL) THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'email or phone is not exisits';
+  END IF;
+END-
+
+DELIMITER ;
+
+-- Добавим логирование добавления новых пользователей, рецензийй и фильмов
+
+CREATE TABLE Logs (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    created_at datetime DEFAULT CURRENT_TIMESTAMP,
+    table_name varchar(50) NOT NULL,
+    row_id INT UNSIGNED NOT NULL,
+    row_name varchar(255)
+) ENGINE = Archive;
+
+DELIMITER -
+
+CREATE TRIGGER films_insert AFTER INSERT ON films
+FOR EACH ROW
+BEGIN
+    INSERT INTO Logs VALUES (NULL, DEFAULT, "films", NEW.id, NEW.title);
+END-
+
+CREATE TRIGGER users_insert AFTER INSERT ON users
+FOR EACH ROW
+BEGIN
+    INSERT INTO Logs VALUES (NULL, DEFAULT, "users", NEW.id, CONCAT(NEW.first_name, ' ', NEW.last_name);
+END-
+
+CREATE TRIGGER reviews_insert AFTER INSERT ON reviews
+FOR EACH ROW
+BEGIN
+    INSERT INTO Logs VALUES (NULL, DEFAULT, "reviews", NEW.id, NEW.film_id);
+END-
+
+DELIMITER ;
+ 
+
+-- Добавим пользователя чтобы проверить логирование
+
+INSERT INTO `users` (`id`, `first_name`, `last_name`, `email`, `phone`, `created_at`, `updated_at`) VALUES (101, 'Annamarie2', 'Harber2', 'hoppe.felicity22@example.net', '525.567.9001x783', '1993-06-12 22:39:26', '2007-05-09 04:34:00');
+SELECT * FROM users ORDER BY users.id DESC LIMIT 1;
+SELECT * FROM Logs;
+
+
